@@ -10,7 +10,11 @@ import {
   OPTION_TYPE_FROM_ANCHOR,
   resolveAnchorCountry,
 } from "@/lib/timezone/countries";
-import { buildDstCalendar, getZoneInfoAt } from "@/lib/timezone/dstCalendar";
+import { buildDstCalendarForCountries, getZoneInfoAt } from "@/lib/timezone/dstCalendar";
+import {
+  getDstCountriesForAcademy,
+  resolveAcademyForDst,
+} from "@/lib/timezone/academyDst";
 
 const TIME_RE = /^(\d{1,2})(?::(\d{2}))?(am|pm)$/i;
 
@@ -96,21 +100,21 @@ function ianaForCountry(name: string): string | undefined {
   return findCountry(name)?.iana;
 }
 
-function collectDstBreaks(
+function collectDstBreaksInRange(
   startIso: string,
   endIso: string,
-  studentCountry: string,
-  anchorCountry: string
+  watchCountries: string[]
 ): DstChangeInfo[] {
-  const calendar = buildDstCalendar(2026, 6);
-  const relevant = calendar.filter(
-    (e) => e.country === studentCountry || e.country === anchorCountry
-  );
   const start = DateTime.fromISO(startIso);
   const end = DateTime.fromISO(endIso);
+  const fromYear = start.isValid ? start.year : new Date().getUTCFullYear();
+  const toYear = end.isValid ? end.year : fromYear;
+  const years = Math.max(1, toYear - fromYear + 2);
+
+  const calendar = buildDstCalendarForCountries(watchCountries, fromYear, years);
   const out: DstChangeInfo[] = [];
 
-  for (const e of relevant) {
+  for (const e of calendar) {
     const change = parseDisplayDate(e.changeDate);
     if (!change.isValid) continue;
     if (change >= start && change <= end) {
@@ -125,7 +129,6 @@ function collectDstBreaks(
     }
   }
 
-  // unique by date+cause
   const seen = new Set<string>();
   return out.filter((c) => {
     const key = `${c.date}|${c.cause}`;
@@ -133,6 +136,31 @@ function collectDstBreaks(
     seen.add(key);
     return true;
   });
+}
+
+/** DST transitions shown in UI — scoped by academy (Spain vs all Latam). */
+function collectAcademyDstBreaks(
+  startIso: string,
+  endIso: string,
+  academy: string | null,
+  anchorCountry: string
+): DstChangeInfo[] {
+  const resolved = resolveAcademyForDst(academy, anchorCountry);
+  const countries = getDstCountriesForAcademy(resolved);
+  return collectDstBreaksInRange(startIso, endIso, countries);
+}
+
+/** DST breaks for schedule segments — anchor + student zones only. */
+function collectSegmentDstBreaks(
+  startIso: string,
+  endIso: string,
+  studentCountry: string,
+  anchorCountry: string
+): DstChangeInfo[] {
+  return collectDstBreaksInRange(startIso, endIso, [
+    studentCountry,
+    anchorCountry,
+  ]);
 }
 
 function convertTimes(
@@ -296,7 +324,13 @@ export function buildCohortOption(
   const optionType =
     raw.optionType || OPTION_TYPE_FROM_ANCHOR[anchorCountry] || anchorCountry;
 
-  const dstChanges = collectDstBreaks(
+  const dstChanges = collectAcademyDstBreaks(
+    startDate,
+    endDate,
+    raw.academy,
+    anchorCountry
+  );
+  const segmentBreaks = collectSegmentDstBreaks(
     startDate,
     endDate,
     studentCountry,
@@ -308,7 +342,7 @@ export function buildCohortOption(
     raw.schedule,
     anchorCountry,
     studentCountry,
-    dstChanges
+    segmentBreaks
   );
 
   const student = findCountry(studentCountry);

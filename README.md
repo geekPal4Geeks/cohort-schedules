@@ -8,7 +8,8 @@ Réplica mejorada de [admissions-sync-tool.replit.app](https://admissions-sync-t
 
 - Conversión de horario ancla → hora local del país del alumno
 - Detección de cambios DST y tramos horarios
-- Opciones estimadas (cuando no hay cohorte real cerca del mes)
+- **Arriba:** una referencia de inicio estimada para el mes/año elegido (sintética, no Notion)
+- **Abajo:** todas las cohortes abiertas de Notion (sin filtro por mes)
 - **`Cohort Code`** (solo lectura desde Notion; lo asigna el cron [`generate-cohort-ids`](https://github.com/4GAES/generate-cohort-ids))
 - Fechas:
   - **Prework** → `Start date (prework)`
@@ -57,7 +58,8 @@ Abre [http://localhost:3000](http://localhost:3000).
 | Método | Ruta | Descripción |
 |--------|------|-------------|
 | `GET` | `/api/countries` | Catálogo de países |
-| `GET` | `/api/cohorts?country&month&year&duration` | Opciones convertidas |
+| `GET` | `/api/cohorts/raw` | Cohortes de Notion (sin conversión horaria) |
+| `GET` | `/api/cohorts?country&month&year&duration` | Opciones convertidas (API externa) |
 | `GET` | `/api/dst-changes` | Calendario DST (ES/PT/CL) |
 | `POST` | `/api/refresh` | Invalida cache y relee Notion |
 
@@ -65,4 +67,9 @@ Abre [http://localhost:3000](http://localhost:3000).
 
 - El browser **nunca** ve `NOTION_TOKEN`.
 - Este repo **no escribe** `Cohort Code`; solo lo muestra.
-- Cache en memoria ~5 min; “Actualizar datos” fuerza refresh.
+- Cache en memoria ~10 min; “Actualizar datos” fuerza refresh.
+- El dashboard carga `/api/cohorts/raw` una vez; cambiar país/mes/año/duración recalcula en el cliente (sin nuevo fetch a Notion).
+- La sync de Notion replica el filtro de la vista de admisiones:
+  - `Start date (prework)` **≥ hoy** (UTC)
+  - `Status` ∈ Enrolling, Unstarted, Ready to Create, Created
+  - `Open` = sí

@@ -2,17 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
   Clock3,
-  Copy,
   Globe2,
   Info,
   RefreshCw,
   UserMinus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CohortTable, type CohortSortKey } from "@/components/CohortTable";
 import { cn } from "@/lib/utils";
-import type { CohortOption, Country, DstCalendarEntry } from "@/lib/types";
+import { computeCohortOptions } from "@/lib/computeCohorts";
+import type { CohortOption, Country, DstCalendarEntry, NotionCohort } from "@/lib/types";
 
 const MONTHS = [
   "Enero",
@@ -29,14 +29,55 @@ const MONTHS = [
   "Diciembre",
 ];
 
-type SortKey =
-  | "option"
-  | "prework"
-  | "inicio"
-  | "fin"
-  | "hora"
-  | "ancla"
-  | "dst";
+type SortKey = CohortSortKey;
+
+function sortOptions(
+  list: CohortOption[],
+  sortKey: SortKey,
+  sortAsc: boolean
+): CohortOption[] {
+  const sorted = [...list];
+  sorted.sort((a, b) => {
+    let cmp = 0;
+    switch (sortKey) {
+      case "option":
+        cmp = (a.cohort.cohortName || "").localeCompare(b.cohort.cohortName || "");
+        break;
+      case "prework":
+        cmp = (a.cohort.preworkStartDate || "").localeCompare(
+          b.cohort.preworkStartDate || ""
+        );
+        break;
+      case "inicio":
+        cmp = (a.cohort.contentStartDate || "").localeCompare(
+          b.cohort.contentStartDate || ""
+        );
+        break;
+      case "fin":
+        cmp = (a.cohort.courseEndDate || "").localeCompare(
+          b.cohort.courseEndDate || ""
+        );
+        break;
+      case "hora":
+        cmp = (a.segments[0]?.localStartTime || "").localeCompare(
+          b.segments[0]?.localStartTime || ""
+        );
+        break;
+      case "ancla":
+        cmp = a.cohort.anchorCountry.localeCompare(b.cohort.anchorCountry);
+        break;
+      case "dst":
+        cmp = Number(a.hasDSTChange) - Number(b.hasDSTChange);
+        break;
+      case "inscripcion":
+        cmp =
+          (a.cohort.studentsCount ?? -1) - (b.cohort.studentsCount ?? -1);
+        break;
+    }
+    return sortAsc ? cmp : -cmp;
+  });
+  return sorted;
+}
 
 function formatIsoDisplay(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -66,14 +107,13 @@ export function Dashboard() {
   const [year, setYear] = useState(now.getUTCFullYear());
   const [duration, setDuration] = useState(20);
   const [tab, setTab] = useState<"cohorts" | "dst">("cohorts");
-  const [options, setOptions] = useState<CohortOption[]>([]);
+  const [rawCohorts, setRawCohorts] = useState<NotionCohort[]>([]);
   const [dstEntries, setDstEntries] = useState<DstCalendarEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [onlyNotStarted, setOnlyNotStarted] = useState(true);
+  const [onlyNotStarted, setOnlyNotStarted] = useState(false);
   const [hideFull, setHideFull] = useState(false);
-  const [showEstimated, setShowEstimated] = useState(true);
   const [programFilter, setProgramFilter] = useState<string>("Todos");
   const [sortKey, setSortKey] = useState<SortKey>("inicio");
   const [sortAsc, setSortAsc] = useState(true);
@@ -92,29 +132,23 @@ export function Dashboard() {
     setDstEntries(data);
   }, []);
 
-  const loadCohorts = useCallback(async () => {
+  const loadRawCohorts = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({
-        country,
-        month: String(month),
-        year: String(year),
-        duration: String(duration),
-      });
-      const res = await fetch(`/api/cohorts?${qs}`);
+      const res = await fetch("/api/cohorts/raw");
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.message || "Error cargando cohortes");
       }
-      setOptions(data as CohortOption[]);
+      setRawCohorts(data as NotionCohort[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      setOptions([]);
+      setRawCohorts([]);
     } finally {
       setLoading(false);
     }
-  }, [country, month, year, duration]);
+  }, []);
 
   useEffect(() => {
     void loadCountries();
@@ -122,86 +156,61 @@ export function Dashboard() {
   }, [loadCountries, loadDst]);
 
   useEffect(() => {
-    void loadCohorts();
-  }, [loadCohorts]);
+    void loadRawCohorts();
+  }, [loadRawCohorts]);
+
+  const { estimated, available } = useMemo(() => {
+    if (rawCohorts.length === 0) {
+      return { estimated: null as CohortOption | null, available: [] as CohortOption[] };
+    }
+    try {
+      return computeCohortOptions(rawCohorts, { country, month, year, duration });
+    } catch {
+      return { estimated: null, available: [] };
+    }
+  }, [rawCohorts, country, month, year, duration]);
 
   const selectedCountry = countries.find((c) => c.name === country);
 
   const programCounts = useMemo(() => {
     const map = new Map<string, number>();
-    for (const o of options) {
+    for (const o of available) {
       map.set(o.cohort.program, (map.get(o.cohort.program) || 0) + 1);
     }
     return map;
-  }, [options]);
+  }, [available]);
 
-  const filtered = useMemo(() => {
+  const filteredAvailable = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
-    let list = [...options];
+    let list = [...available];
 
     if (onlyNotStarted) {
-      list = list.filter(
-        (o) => !o.cohort.contentStartDate || o.cohort.contentStartDate >= today
-      );
+      list = list.filter((o) => {
+        const status = (o.cohort.status || "").toLowerCase();
+        if (status.includes("discarded")) return false;
+        if (status.includes("prework")) return true;
+        return (
+          !!o.cohort.contentStartDate && o.cohort.contentStartDate >= today
+        );
+      });
     }
     if (hideFull) {
       list = list.filter((o) => {
-        if (o.cohort.isEstimated) return true;
         if (o.cohort.studentsCount == null || o.cohort.studentGoal == null) {
           return o.cohort.isOpen;
         }
         return o.cohort.studentsCount < o.cohort.studentGoal;
       });
     }
-    if (!showEstimated) {
-      list = list.filter((o) => !o.cohort.isEstimated);
-    }
     if (programFilter !== "Todos") {
       list = list.filter((o) => o.cohort.program === programFilter);
     }
 
-    list.sort((a, b) => {
-      let cmp = 0;
-      switch (sortKey) {
-        case "option":
-          cmp = (a.cohort.cohortName || "").localeCompare(b.cohort.cohortName || "");
-          break;
-        case "prework":
-          cmp = (a.cohort.preworkStartDate || "").localeCompare(
-            b.cohort.preworkStartDate || ""
-          );
-          break;
-        case "inicio":
-          cmp = (a.cohort.contentStartDate || "").localeCompare(
-            b.cohort.contentStartDate || ""
-          );
-          break;
-        case "fin":
-          cmp = (a.cohort.courseEndDate || "").localeCompare(
-            b.cohort.courseEndDate || ""
-          );
-          break;
-        case "hora":
-          cmp = (a.segments[0]?.localStartTime || "").localeCompare(
-            b.segments[0]?.localStartTime || ""
-          );
-          break;
-        case "ancla":
-          cmp = a.cohort.anchorCountry.localeCompare(b.cohort.anchorCountry);
-          break;
-        case "dst":
-          cmp = Number(a.hasDSTChange) - Number(b.hasDSTChange);
-          break;
-      }
-      return sortAsc ? cmp : -cmp;
-    });
-
-    return list;
+    return sortOptions(list, sortKey, sortAsc);
   }, [
-    options,
+    available,
     onlyNotStarted,
     hideFull,
-    showEstimated,
     programFilter,
     sortKey,
     sortAsc,
@@ -219,7 +228,7 @@ export function Dashboard() {
     setRefreshing(true);
     try {
       await fetch("/api/refresh", { method: "POST" });
-      await loadCohorts();
+      await loadRawCohorts();
     } finally {
       setRefreshing(false);
     }
@@ -346,7 +355,7 @@ export function Dashboard() {
             <Globe2 className="h-4 w-4" />
             Cohortes
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-              {filtered.length}/{options.length}
+              {filteredAvailable.length}/{available.length}
             </span>
           </button>
           <button
@@ -374,212 +383,89 @@ export function Dashboard() {
         )}
 
         {tab === "cohorts" ? (
-          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-4 flex flex-col gap-3">
-              <h2 className="text-base font-semibold">Opciones de cohortes disponibles</h2>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant={onlyNotStarted ? "default" : "outline"}
-                  onClick={() => setOnlyNotStarted((v) => !v)}
-                >
-                  Solo sin iniciar
-                </Button>
-                <Button
-                  size="sm"
-                  variant={hideFull ? "default" : "outline"}
-                  onClick={() => setHideFull((v) => !v)}
-                >
-                  <UserMinus className="h-3.5 w-3.5" />
-                  Ocultar llenas
-                </Button>
-                <Button
-                  size="sm"
-                  variant={showEstimated ? "warning" : "outline"}
-                  onClick={() => setShowEstimated((v) => !v)}
-                >
-                  Mostrar estimadas
-                </Button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant={programFilter === "Todos" ? "default" : "outline"}
-                  onClick={() => setProgramFilter("Todos")}
-                >
-                  Todos {options.length}
-                </Button>
-                {[...programCounts.entries()].map(([program, count]) => (
-                  <Button
-                    key={program}
-                    size="sm"
-                    variant={programFilter === program ? "default" : "outline"}
-                    onClick={() => setProgramFilter(program)}
-                  >
-                    {program} {count}
-                  </Button>
-                ))}
-              </div>
-            </div>
+          <div className="space-y-4">
+            {estimated && (
+              <section className="rounded-xl border border-amber-200 bg-amber-50/30 p-4 shadow-sm">
+                <div className="mb-3">
+                  <h2 className="text-base font-semibold text-amber-950">
+                    Inicio estimado para {MONTHS[month - 1]} {year}
+                  </h2>
+                  <p className="mt-1 text-xs text-amber-800/80">
+                    Referencia horaria según el mes deseado y el país del alumno.
+                    No es una cohorte real en Notion.
+                  </p>
+                </div>
+                <CohortTable
+                  rows={[estimated]}
+                  sortKey={sortKey}
+                  sortAsc={sortAsc}
+                  onSort={toggleSort}
+                  copiedId={copiedId}
+                  onCopyCode={(code, id) => void onCopyCode(code, id)}
+                  onShowDetail={setDetail}
+                  showSort={false}
+                />
+              </section>
+            )}
 
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                    {(
-                      [
-                        ["option", "Opción"],
-                        ["prework", "Prework"],
-                        ["inicio", "Inicio"],
-                        ["fin", "Fin"],
-                        ["hora", "Hora local"],
-                        ["ancla", "Ancla"],
-                        ["dst", "Cambia DST"],
-                      ] as Array<[SortKey, string]>
-                    ).map(([key, label]) => (
-                      <th key={key} className="px-2 py-3 font-medium">
-                        <button
-                          type="button"
-                          className="hover:text-slate-800"
-                          onClick={() => toggleSort(key)}
-                        >
-                          {label}
-                          {sortKey === key ? (sortAsc ? " ↑" : " ↓") : ""}
-                        </button>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? (
-                    <tr>
-                      <td colSpan={7} className="px-2 py-8 text-center text-slate-500">
-                        Cargando cohortes…
-                      </td>
-                    </tr>
-                  ) : filtered.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="px-2 py-8 text-center text-slate-500">
-                        No hay cohortes para estos filtros.
-                      </td>
-                    </tr>
-                  ) : (
-                    filtered.map((o) => {
-                      const seg = o.segments[0];
-                      const code = o.cohort.cohortCode;
-                      return (
-                        <tr
-                          key={o.cohort.id}
-                          className={cn(
-                            "border-b border-slate-100 align-top",
-                            o.cohort.isEstimated && "opacity-70"
-                          )}
-                        >
-                          <td className="px-2 py-3">
-                            <div className="font-medium text-slate-900">
-                              {o.cohort.isEstimated ? (
-                                <span className="italic">
-                                  {o.cohort.program} ({o.cohort.optionType})
-                                </span>
-                              ) : (
-                                o.cohort.cohortName
-                              )}
-                            </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                              {code ? (
-                                <button
-                                  type="button"
-                                  onClick={() => void onCopyCode(code, o.cohort.id)}
-                                  className="inline-flex items-center gap-1 rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[11px] text-white hover:bg-slate-700"
-                                  title="Copiar Cohort Code"
-                                >
-                                  {code}
-                                  <Copy className="h-3 w-3" />
-                                  {copiedId === o.cohort.id ? " ✓" : ""}
-                                </button>
-                              ) : (
-                                !o.cohort.isEstimated && (
-                                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800">
-                                    Sin código
-                                  </span>
-                                )
-                              )}
-                              {o.cohort.academy && (
-                                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">
-                                  {o.cohort.academy}
-                                </span>
-                              )}
-                              <span
-                                className={cn(
-                                  "rounded px-1.5 py-0.5 text-[11px]",
-                                  o.cohort.isEstimated
-                                    ? "bg-amber-50 text-amber-800"
-                                    : "bg-green-50 text-green-800"
-                                )}
-                              >
-                                {o.cohort.status}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-2 py-3 whitespace-nowrap text-slate-700">
-                            {formatIsoDisplay(o.cohort.preworkStartDate)}
-                          </td>
-                          <td className="px-2 py-3 whitespace-nowrap text-slate-700">
-                            {formatIsoDisplay(o.cohort.contentStartDate)}
-                          </td>
-                          <td className="px-2 py-3 whitespace-nowrap text-slate-700">
-                            {formatIsoDisplay(o.cohort.courseEndDate)}
-                          </td>
-                          <td className="px-2 py-3">
-                            <div>
-                              {seg
-                                ? `${seg.localStartTime} – ${seg.localEndTime}`
-                                : "—"}
-                              {seg?.dayShift ? (
-                                <span className="ml-1 text-xs text-slate-400">
-                                  {seg.dayShift}
-                                </span>
-                              ) : null}
-                            </div>
-                            <div className="text-xs text-slate-400">
-                              Franja máx: {o.maxBand.earliestStart} – {o.maxBand.latestEnd}
-                            </div>
-                          </td>
-                          <td className="px-2 py-3">
-                            <div>{o.cohort.anchorCountry}</div>
-                            <div className="text-xs text-slate-400">
-                              {seg
-                                ? `${seg.anchorAbbr} (${offsetLabel(seg.anchorOffset)})`
-                                : "—"}
-                            </div>
-                          </td>
-                          <td className="px-2 py-3">
-                            {o.hasDSTChange ? (
-                              <div className="flex flex-col items-start gap-1">
-                                <span className="inline-flex items-center gap-1 text-amber-700">
-                                  <AlertTriangle className="h-3.5 w-3.5" />
-                                  Sí
-                                </span>
-                                <button
-                                  type="button"
-                                  className="text-xs text-blue-600 hover:underline"
-                                  onClick={() => setDetail(o)}
-                                >
-                                  ver detalle
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-slate-400">No</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
+            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-4 flex flex-col gap-3">
+                <h2 className="text-base font-semibold">
+                  Todas las opciones disponibles (Notion)
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Cohortes abiertas con prework futuro, sin filtrar por mes.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant={onlyNotStarted ? "default" : "outline"}
+                    onClick={() => setOnlyNotStarted((v) => !v)}
+                  >
+                    Solo sin iniciar
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={hideFull ? "default" : "outline"}
+                    onClick={() => setHideFull((v) => !v)}
+                  >
+                    <UserMinus className="h-3.5 w-3.5" />
+                    Ocultar llenas
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant={programFilter === "Todos" ? "default" : "outline"}
+                    onClick={() => setProgramFilter("Todos")}
+                  >
+                    Todos {available.length}
+                  </Button>
+                  {[...programCounts.entries()].map(([program, count]) => (
+                    <Button
+                      key={program}
+                      size="sm"
+                      variant={programFilter === program ? "default" : "outline"}
+                      onClick={() => setProgramFilter(program)}
+                    >
+                      {program} {count}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <CohortTable
+                rows={filteredAvailable}
+                loading={loading}
+                sortKey={sortKey}
+                sortAsc={sortAsc}
+                onSort={toggleSort}
+                copiedId={copiedId}
+                onCopyCode={(code, id) => void onCopyCode(code, id)}
+                onShowDetail={setDetail}
+              />
+            </section>
+          </div>
         ) : (
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="text-base font-semibold">

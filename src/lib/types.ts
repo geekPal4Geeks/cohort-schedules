@@ -75,3 +75,10 @@ export type DstCalendarEntry = {
   fromOffset: number;
   toOffset: number;
 };
+
+export type CohortsResponse = {
+  /** Reference slot for the desired month (synthetic, not from Notion) */
+  estimated: CohortOption | null;
+  /** All open cohorts from Notion (no month window filter) */
+  available: CohortOption[];
+};

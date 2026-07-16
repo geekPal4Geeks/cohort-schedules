@@ -2,98 +2,95 @@ import { DateTime } from "luxon";
 import type { NotionCohort } from "@/lib/types";
 import { addDaysIso } from "@/lib/timezone/convertSchedule";
 
-type EstimatedTemplate = {
-  program: string;
+type AnchorProfile = {
   anchorCountry: string;
   optionType: string;
   schedule: string;
   notionTimezone: string;
-  namePrefix: string;
+  slug: string;
 };
 
-const TEMPLATES: EstimatedTemplate[] = [
-  {
-    program: "Full Stack (Python)",
-    anchorCountry: "España",
-    optionType: "España Tardes",
-    schedule: "ES-MWF-630pm-930pm",
-    notionTimezone: "Europe/Madrid",
-    namePrefix: "spain-fs-est",
-  },
-  {
-    program: "Full Stack (Python)",
-    anchorCountry: "Chile",
-    optionType: "Sudamérica",
-    schedule: "CL-MWF-630pm-930pm",
-    notionTimezone: "Sudamerica",
-    namePrefix: "latam-fs-est",
-  },
-  {
-    program: "AI Engineering",
-    anchorCountry: "España",
-    optionType: "España Tardes",
-    schedule: "ES-MWF-630pm-930pm",
-    notionTimezone: "Europe/Madrid",
-    namePrefix: "spain-aie-est",
-  },
-  {
-    program: "Cybersecurity",
+const EUROPE_STUDENTS = new Set(["España", "Portugal"]);
+const SOUTH_AMERICA_STUDENTS = new Set([
+  "Chile",
+  "Argentina",
+  "Uruguay",
+  "Paraguay",
+  "Bolivia",
+  "Venezuela",
+]);
+
+function anchorForStudentCountry(studentCountry: string): AnchorProfile {
+  if (EUROPE_STUDENTS.has(studentCountry)) {
+    return {
+      anchorCountry: "España",
+      optionType: "España Tardes",
+      schedule: "ES-MWF-630pm-930pm",
+      notionTimezone: "Europe/Madrid",
+      slug: "es",
+    };
+  }
+  if (SOUTH_AMERICA_STUDENTS.has(studentCountry)) {
+    return {
+      anchorCountry: "Chile",
+      optionType: "Sudamérica",
+      schedule: "CL-MWF-630pm-930pm",
+      notionTimezone: "Sudamerica",
+      slug: "la",
+    };
+  }
+  return {
     anchorCountry: "México",
     optionType: "Centroamérica",
     schedule: "MX-MWF-630pm-930pm",
     notionTimezone: "Centroamerica",
-    namePrefix: "latam-cyb-est",
-  },
-  {
-    program: "Data Science/ML",
-    anchorCountry: "España",
-    optionType: "España Tardes",
-    schedule: "ES-MWF-630pm-930pm",
-    notionTimezone: "Europe/Madrid",
-    namePrefix: "spain-ds-est",
-  },
-];
+    slug: "mx",
+  };
+}
 
-/**
- * Synthetic cohort options for months without a real Notion row.
- * start = 2nd Monday of the desired month (approx), end = +duration weeks.
- */
-export function buildEstimatedCohorts(
-  month: number,
-  year: number,
-  durationWeeks: number
-): NotionCohort[] {
-  const secondMonday = DateTime.fromObject({ year, month, day: 1 })
-    .set({ weekday: 1 })
-    .plus({ weeks: DateTime.fromObject({ year, month, day: 1 }).weekday <= 1 ? 1 : 2 });
-
-  // Prefer a stable mid-month Monday-ish date close to Replit samples (e.g. 13)
+/** Mid-month weekday for the desired month (≈ day 13, skip weekends). */
+export function estimatedContentStart(month: number, year: number): string {
   let start = DateTime.fromObject({ year, month, day: 13 });
   while (start.weekday > 5) {
     start = start.plus({ days: 1 });
   }
-  void secondMonday;
+  return start.toISODate()!;
+}
 
-  const startIso = start.toISODate()!;
+/**
+ * Single synthetic reference cohort for the desired start month.
+ * Anchor schedule follows the student's region (EU / Sudamérica / Centroamérica).
+ */
+export function buildEstimatedCohort(
+  studentCountry: string,
+  month: number,
+  year: number,
+  durationWeeks: number
+): NotionCohort {
+  const anchor = anchorForStudentCountry(studentCountry);
+  const startIso = estimatedContentStart(month, year);
   const endIso = addDaysIso(startIso, durationWeeks * 7);
+  const monthLabel = DateTime.fromObject({ month, year })
+    .setLocale("es")
+    .toFormat("LLLL yyyy");
 
-  return TEMPLATES.map((t) => ({
-    id: `estimated-${t.program}-${t.anchorCountry === "España" ? "ES" : "LA"}-${startIso}`,
-    cohortName: `${t.namePrefix}-${startIso}`,
-    program: t.program,
-    academy: null,
+  return {
+    id: `estimated-${anchor.slug}-${year}-${String(month).padStart(2, "0")}`,
+    cohortName: `Inicio estimado — ${monthLabel}`,
+    program: "Referencia horaria",
+    academy: anchor.anchorCountry === "España" ? "6-Spain" : "7-Latam",
     cohortCode: null,
     preworkStartDate: addDaysIso(startIso, -14),
     contentStartDate: startIso,
     courseEndDate: endIso,
-    anchorCountry: t.anchorCountry,
-    optionType: t.optionType,
+    anchorCountry: anchor.anchorCountry,
+    optionType: anchor.optionType,
     status: "Estimada",
-    schedule: t.schedule,
-    notionTimezone: t.notionTimezone,
+    schedule: anchor.schedule,
+    notionTimezone: anchor.notionTimezone,
     studentsCount: null,
     studentGoal: null,
     isOpen: true,
     isEstimated: true,
-  }));
+  };
 }

@@ -22,6 +22,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(options);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ message }, { status: 500 });
+    const isTimeout = message.toLowerCase().includes("timeout");
+    return NextResponse.json(
+      {
+        message: isTimeout
+          ? "Notion tardó demasiado en responder. Pulsa «Actualizar datos» de nuevo o espera unos segundos."
+          : message,
+      },
+      { status: isTimeout ? 504 : 500 }
+    );
   }
 }

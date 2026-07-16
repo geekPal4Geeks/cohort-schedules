@@ -22,8 +22,17 @@ export function loadConfig() {
     timezonePropertyName: "Time Zone",
     statusPropertyName: "Status",
     studentsCountPropertyName: "Students Count",
-    studentGoalPropertyName: "Actual students",
+    studentGoalPropertyName: "Student Goal",
     openPropertyName: "Open",
+    /** Select value meaning cohort is open for enrollment */
+    openYesValue: "Yes",
+    /** Status values included when syncing from Notion (see DB view filter) */
+    eligibleStatuses: [
+      "Enrolling",
+      "Unstarted",
+      "Ready to Create",
+      "Created",
+    ] as const,
   };
 }
 
