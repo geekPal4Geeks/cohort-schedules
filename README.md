@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# cohort-schedules
 
-## Getting Started
+Dashboard **4Geeks Horarios**: visualiza cohortes de Notion en la zona horaria del alumno, con **Cohort Code** y las tres fechas académicas.
 
-First, run the development server:
+Réplica mejorada de [admissions-sync-tool.replit.app](https://admissions-sync-tool.replit.app/).
+
+## Qué muestra
+
+- Conversión de horario ancla → hora local del país del alumno
+- Detección de cambios DST y tramos horarios
+- Opciones estimadas (cuando no hay cohorte real cerca del mes)
+- **`Cohort Code`** (solo lectura desde Notion; lo asigna el cron [`generate-cohort-ids`](https://github.com/4GAES/generate-cohort-ids))
+- Fechas:
+  - **Prework** → `Start date (prework)`
+  - **Inicio** → `Start Date (content)`
+  - **Fin** → `End Date (course)`
+
+## Stack
+
+- Next.js (App Router) + TypeScript + Tailwind
+- `@notionhq/client` (servidor)
+- Luxon (DST / offsets)
+
+## Setup
+
+### 1. Notion
+
+1. Crea una integración en [notion.so/my-integrations](https://www.notion.so/my-integrations)
+2. Comparte la base de cohortes con la integración
+3. Copia el token y el database ID
+
+Asegúrate de que exista la propiedad Text **`Cohort Code`** (la rellena el cron de IDs).
+
+### 2. Env
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+```env
+NOTION_TOKEN=secret_...
+NOTION_DATABASE_ID=...
+ID_PROPERTY_NAME=Cohort Code
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 3. Run
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+npm run dev
+```
 
-## Learn More
+Abre [http://localhost:3000](http://localhost:3000).
 
-To learn more about Next.js, take a look at the following resources:
+## API
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `GET` | `/api/countries` | Catálogo de países |
+| `GET` | `/api/cohorts?country&month&year&duration` | Opciones convertidas |
+| `GET` | `/api/dst-changes` | Calendario DST (ES/PT/CL) |
+| `POST` | `/api/refresh` | Invalida cache y relee Notion |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Notas
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- El browser **nunca** ve `NOTION_TOKEN`.
+- Este repo **no escribe** `Cohort Code`; solo lo muestra.
+- Cache en memoria ~5 min; “Actualizar datos” fuerza refresh.
