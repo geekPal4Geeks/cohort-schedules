@@ -30,7 +30,7 @@ export function getDstCountriesForAcademy(academy: string | null): string[] {
     : [...LATAM_COUNTRY_NAMES];
 }
 
-/** Infer academy label when Notion field is empty (e.g. estimated rows). */
+/** Infer academy label when Notion field is empty. */
 export function resolveAcademyForDst(
   academy: string | null,
   anchorCountry: string

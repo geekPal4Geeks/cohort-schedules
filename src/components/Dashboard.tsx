@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Clock3,
+  Copy,
   Globe2,
   Info,
   RefreshCw,
@@ -10,24 +11,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CohortTable, type CohortSortKey } from "@/components/CohortTable";
+import { CountrySelect } from "@/components/CountrySelect";
 import { cn } from "@/lib/utils";
 import { computeCohortOptions } from "@/lib/computeCohorts";
+import { GENERIC_PLACEHOLDERS } from "@/lib/genericPlaceholders";
 import type { CohortOption, Country, DstCalendarEntry, NotionCohort } from "@/lib/types";
-
-const MONTHS = [
-  "Enero",
-  "Febrero",
-  "Marzo",
-  "Abril",
-  "Mayo",
-  "Junio",
-  "Julio",
-  "Agosto",
-  "Septiembre",
-  "Octubre",
-  "Noviembre",
-  "Diciembre",
-];
 
 type SortKey = CohortSortKey;
 
@@ -48,19 +36,14 @@ function sortOptions(
           b.cohort.preworkStartDate || ""
         );
         break;
-      case "inicio":
-        cmp = (a.cohort.contentStartDate || "").localeCompare(
-          b.cohort.contentStartDate || ""
-        );
-        break;
       case "fin":
         cmp = (a.cohort.courseEndDate || "").localeCompare(
           b.cohort.courseEndDate || ""
         );
         break;
       case "hora":
-        cmp = (a.segments[0]?.localStartTime || "").localeCompare(
-          b.segments[0]?.localStartTime || ""
+        cmp = (a.timeBands[0]?.localStartTime || "").localeCompare(
+          b.timeBands[0]?.localStartTime || ""
         );
         break;
       case "ancla":
@@ -100,22 +83,17 @@ async function copyText(text: string) {
 }
 
 export function Dashboard() {
-  const now = new Date();
   const [countries, setCountries] = useState<Country[]>([]);
   const [country, setCountry] = useState("España");
-  const [month, setMonth] = useState(now.getUTCMonth() + 1);
-  const [year, setYear] = useState(now.getUTCFullYear());
-  const [duration, setDuration] = useState(20);
   const [tab, setTab] = useState<"cohorts" | "dst">("cohorts");
   const [rawCohorts, setRawCohorts] = useState<NotionCohort[]>([]);
   const [dstEntries, setDstEntries] = useState<DstCalendarEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [onlyNotStarted, setOnlyNotStarted] = useState(false);
   const [hideFull, setHideFull] = useState(false);
   const [programFilter, setProgramFilter] = useState<string>("Todos");
-  const [sortKey, setSortKey] = useState<SortKey>("inicio");
+  const [sortKey, setSortKey] = useState<SortKey>("prework");
   const [sortAsc, setSortAsc] = useState(true);
   const [detail, setDetail] = useState<CohortOption | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -159,41 +137,27 @@ export function Dashboard() {
     void loadRawCohorts();
   }, [loadRawCohorts]);
 
-  const { estimated, available } = useMemo(() => {
-    if (rawCohorts.length === 0) {
-      return { estimated: null as CohortOption | null, available: [] as CohortOption[] };
-    }
+  const options = useMemo(() => {
     try {
-      return computeCohortOptions(rawCohorts, { country, month, year, duration });
+      return computeCohortOptions(rawCohorts, { country });
     } catch {
-      return { estimated: null, available: [] };
+      return [];
     }
-  }, [rawCohorts, country, month, year, duration]);
+  }, [rawCohorts, country]);
 
   const selectedCountry = countries.find((c) => c.name === country);
 
   const programCounts = useMemo(() => {
     const map = new Map<string, number>();
-    for (const o of available) {
+    for (const o of options) {
       map.set(o.cohort.program, (map.get(o.cohort.program) || 0) + 1);
     }
     return map;
-  }, [available]);
+  }, [options]);
 
   const filteredAvailable = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    let list = [...available];
+    let list = [...options];
 
-    if (onlyNotStarted) {
-      list = list.filter((o) => {
-        const status = (o.cohort.status || "").toLowerCase();
-        if (status.includes("discarded")) return false;
-        if (status.includes("prework")) return true;
-        return (
-          !!o.cohort.contentStartDate && o.cohort.contentStartDate >= today
-        );
-      });
-    }
     if (hideFull) {
       list = list.filter((o) => {
         if (o.cohort.studentsCount == null || o.cohort.studentGoal == null) {
@@ -207,14 +171,7 @@ export function Dashboard() {
     }
 
     return sortOptions(list, sortKey, sortAsc);
-  }, [
-    available,
-    onlyNotStarted,
-    hideFull,
-    programFilter,
-    sortKey,
-    sortAsc,
-  ]);
+  }, [options, hideFull, programFilter, sortKey, sortAsc]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortAsc((v) => !v);
@@ -239,8 +196,6 @@ export function Dashboard() {
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 1500);
   };
-
-  const years = [year - 1, year, year + 1, year + 2];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -267,80 +222,6 @@ export function Dashboard() {
           </Button>
         </header>
 
-        <section className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <label className="block text-sm">
-              <span className="mb-1.5 block font-medium text-slate-700">
-                País del alumno
-              </span>
-              <select
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
-                value={country}
-                onChange={(e) => setCountry(e.target.value)}
-              >
-                {countries.map((c) => (
-                  <option key={c.name} value={c.name}>
-                    {c.name} {c.offsetStr}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1.5 block font-medium text-slate-700">
-                Mes deseado de inicio
-              </span>
-              <select
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
-                value={month}
-                onChange={(e) => setMonth(Number(e.target.value))}
-              >
-                {MONTHS.map((name, idx) => (
-                  <option key={name} value={idx + 1}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1.5 block font-medium text-slate-700">Año</span>
-              <select
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
-                value={year}
-                onChange={(e) => setYear(Number(e.target.value))}
-              >
-                {years.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1.5 block font-medium text-slate-700">
-                Duración (semanas)
-              </span>
-              <input
-                type="number"
-                min={1}
-                max={52}
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
-                value={duration}
-                onChange={(e) => setDuration(Number(e.target.value) || 20)}
-              />
-            </label>
-          </div>
-          {selectedCountry && (
-            <p className="mt-3 flex items-start gap-2 text-xs text-slate-500">
-              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              Mostrando horarios en hora local de {selectedCountry.name} (
-              {selectedCountry.abbr}, {selectedCountry.offsetStr})
-              {selectedCountry.hasDST
-                ? " — Este país tiene cambio de horario (DST)."
-                : "."}
-            </p>
-          )}
-        </section>
-
         <div className="mb-4 flex gap-2 border-b border-slate-200">
           <button
             type="button"
@@ -355,7 +236,7 @@ export function Dashboard() {
             <Globe2 className="h-4 w-4" />
             Cohortes
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-              {filteredAvailable.length}/{available.length}
+              {filteredAvailable.length}
             </span>
           </button>
           <button
@@ -383,47 +264,42 @@ export function Dashboard() {
         )}
 
         {tab === "cohorts" ? (
-          <div className="space-y-4">
-            {estimated && (
-              <section className="rounded-xl border border-amber-200 bg-amber-50/30 p-4 shadow-sm">
-                <div className="mb-3">
-                  <h2 className="text-base font-semibold text-amber-950">
-                    Inicio estimado para {MONTHS[month - 1]} {year}
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex flex-col gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h2 className="text-base font-semibold">
+                    Opciones disponibles
                   </h2>
-                  <p className="mt-1 text-xs text-amber-800/80">
-                    Referencia horaria según el mes deseado y el país del alumno.
-                    No es una cohorte real en Notion.
+                  <p className="text-xs text-slate-500">
+                    Cohortes abiertas en Notion. Horario según país del alumno.
                   </p>
                 </div>
-                <CohortTable
-                  rows={[estimated]}
-                  sortKey={sortKey}
-                  sortAsc={sortAsc}
-                  onSort={toggleSort}
-                  copiedId={copiedId}
-                  onCopyCode={(code, id) => void onCopyCode(code, id)}
-                  onShowDetail={setDetail}
-                  showSort={false}
-                />
-              </section>
-            )}
+                <label className="block text-sm sm:w-72">
+                  <span className="mb-1.5 block font-medium text-slate-700">
+                    País del alumno
+                  </span>
+                  <CountrySelect
+                    countries={countries}
+                    value={country}
+                    onChange={setCountry}
+                  />
+                </label>
+              </div>
 
-            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="mb-4 flex flex-col gap-3">
-                <h2 className="text-base font-semibold">
-                  Todas las opciones disponibles (Notion)
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Cohortes abiertas con prework futuro, sin filtrar por mes.
+              {selectedCountry && (
+                <p className="flex items-start gap-2 text-xs text-slate-500">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  Horarios convertidos a hora local de {selectedCountry.name} (
+                  {selectedCountry.abbr}, {selectedCountry.offsetStr})
+                  {selectedCountry.hasDST
+                    ? " — Este país tiene cambio de horario (DST)."
+                    : "."}
                 </p>
+              )}
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant={onlyNotStarted ? "default" : "outline"}
-                    onClick={() => setOnlyNotStarted((v) => !v)}
-                  >
-                    Solo sin iniciar
-                  </Button>
                   <Button
                     size="sm"
                     variant={hideFull ? "default" : "outline"}
@@ -433,39 +309,83 @@ export function Dashboard() {
                     Ocultar llenas
                   </Button>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant={programFilter === "Todos" ? "default" : "outline"}
-                    onClick={() => setProgramFilter("Todos")}
-                  >
-                    Todos {available.length}
-                  </Button>
-                  {[...programCounts.entries()].map(([program, count]) => (
-                    <Button
-                      key={program}
-                      size="sm"
-                      variant={programFilter === program ? "default" : "outline"}
-                      onClick={() => setProgramFilter(program)}
-                    >
-                      {program} {count}
-                    </Button>
+                <div className="flex flex-wrap items-end gap-3">
+                  <span className="mb-1.5 text-xs font-medium text-slate-500">
+                    Sin cohorte:
+                  </span>
+                  {GENERIC_PLACEHOLDERS.map((p) => (
+                    <div key={p.id} className="flex flex-col gap-1">
+                      <span className="text-[11px] font-medium text-blue-800">
+                        {p.program}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void onCopyCode(p.cohortCode, p.id)}
+                        title={`Copiar ${p.cohortCode}`}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-900 px-2 py-1.5 font-mono text-[11px] text-white hover:bg-slate-700"
+                      >
+                        {p.cohortCode}
+                        <Copy className="h-3 w-3 shrink-0 opacity-80" />
+                        {copiedId === p.id ? " ✓" : ""}
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant={programFilter === "Todos" ? "default" : "outline"}
+                  onClick={() => setProgramFilter("Todos")}
+                  className="gap-1.5"
+                >
+                  Todos
+                  <span
+                    className={cn(
+                      "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums",
+                      programFilter === "Todos"
+                        ? "bg-white/20 text-white"
+                        : "bg-slate-100 text-slate-700"
+                    )}
+                  >
+                    {options.length}
+                  </span>
+                </Button>
+                {[...programCounts.entries()].map(([program, count]) => (
+                  <Button
+                    key={program}
+                    size="sm"
+                    variant={programFilter === program ? "default" : "outline"}
+                    onClick={() => setProgramFilter(program)}
+                    className="gap-1.5"
+                  >
+                    {program}
+                    <span
+                      className={cn(
+                        "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums",
+                        programFilter === program
+                          ? "bg-white/20 text-white"
+                          : "bg-slate-100 text-slate-700"
+                      )}
+                    >
+                      {count}
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            </div>
 
-              <CohortTable
-                rows={filteredAvailable}
-                loading={loading}
-                sortKey={sortKey}
-                sortAsc={sortAsc}
-                onSort={toggleSort}
-                copiedId={copiedId}
-                onCopyCode={(code, id) => void onCopyCode(code, id)}
-                onShowDetail={setDetail}
-              />
-            </section>
-          </div>
+            <CohortTable
+              rows={filteredAvailable}
+              loading={loading}
+              sortKey={sortKey}
+              sortAsc={sortAsc}
+              onSort={toggleSort}
+              copiedId={copiedId}
+              onCopyCode={(code, id) => void onCopyCode(code, id)}
+              onShowDetail={setDetail}
+            />
+          </section>
         ) : (
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="text-base font-semibold">
@@ -530,20 +450,31 @@ export function Dashboard() {
               </button>
             </div>
 
-            <div className="mb-4 grid gap-2 rounded-lg bg-slate-50 p-3 text-sm sm:grid-cols-3">
+            <div className="mb-4 grid gap-2 rounded-lg bg-slate-50 p-3 text-sm sm:grid-cols-2">
               <div>
                 <div className="text-xs text-slate-500">Prework</div>
                 <div>{formatIsoDisplay(detail.cohort.preworkStartDate)}</div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Inicio (content)</div>
-                <div>{formatIsoDisplay(detail.cohort.contentStartDate)}</div>
               </div>
               <div>
                 <div className="text-xs text-slate-500">Fin (course)</div>
                 <div>{formatIsoDisplay(detail.cohort.courseEndDate)}</div>
               </div>
             </div>
+
+            {detail.timeBands.length > 1 && (
+              <div className="mb-4">
+                <h3 className="mb-2 text-sm font-semibold">Horarios (rotativo)</h3>
+                <div className="space-y-1 text-sm">
+                  {detail.timeBands.map((band) => (
+                    <div key={band.label}>
+                      <span className="font-medium">{band.label}:</span>{" "}
+                      {band.localStartTime} – {band.localEndTime}
+                      {band.dayShift ? ` ${band.dayShift}` : ""}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <h3 className="mb-2 text-sm font-semibold">Cambios DST en el rango</h3>
             <div className="mb-4 space-y-2">

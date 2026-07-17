@@ -99,7 +99,6 @@ function mapPage(page: PageObjectResponse, config: AppConfig): NotionCohort {
     studentsCount: numberVal(page, config.studentsCountPropertyName),
     studentGoal: numberVal(page, config.studentGoalPropertyName),
     isOpen: openVal(page, config.openPropertyName, config.openYesValue),
-    isEstimated: false,
   };
 }
 

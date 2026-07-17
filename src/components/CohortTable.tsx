@@ -7,7 +7,6 @@ import type { CohortOption } from "@/lib/types";
 export type CohortSortKey =
   | "option"
   | "prework"
-  | "inicio"
   | "fin"
   | "hora"
   | "ancla"
@@ -17,7 +16,6 @@ export type CohortSortKey =
 const COLUMNS: Array<[CohortSortKey, string]> = [
   ["option", "Opción"],
   ["prework", "Prework"],
-  ["inicio", "Inicio"],
   ["fin", "Fin"],
   ["hora", "Hora local"],
   ["ancla", "Ancla"],
@@ -50,15 +48,19 @@ function EnrollmentCell({ cohort }: { cohort: CohortOption["cohort"] }) {
 
   let barColor = "bg-emerald-500";
   let textColor = "text-slate-900";
-  if (fillPct != null) {
-    if (fillPct >= 100) {
+  if (fillPct != null && hasCount && hasGoal) {
+    if (studentsCount! > studentGoal!) {
       barColor = "bg-red-500";
       textColor = "text-red-700";
+    } else if (fillPct >= 100) {
+      barColor = "bg-blue-500";
+      textColor = "text-blue-700";
     } else if (fillPct >= 80) {
+      barColor = "bg-emerald-500";
+      textColor = "text-emerald-700";
+    } else {
       barColor = "bg-amber-500";
       textColor = "text-amber-700";
-    } else {
-      textColor = "text-emerald-700";
     }
   }
 
@@ -156,7 +158,7 @@ export function CohortTable({
         <tbody>
           {loading ? (
             <tr>
-              <td colSpan={8} className="px-2 py-8 text-center text-slate-500">
+              <td colSpan={7} className="px-2 py-8 text-center text-slate-500">
                 <div>Cargando cohortes desde Notion…</div>
                 <div className="mt-1 text-xs text-slate-400">
                   La primera consulta puede tardar 20–40 s; las siguientes usan
@@ -166,34 +168,24 @@ export function CohortTable({
             </tr>
           ) : rows.length === 0 ? (
             <tr>
-              <td colSpan={8} className="px-2 py-8 text-center text-slate-500">
+              <td colSpan={7} className="px-2 py-8 text-center text-slate-500">
                 {emptyMessage}
               </td>
             </tr>
           ) : (
             rows.map((o) => {
-              const seg = o.segments[0];
               const code = o.cohort.cohortCode;
               return (
                 <tr
                   key={o.cohort.id}
                   className={cn(
                     "border-b border-slate-100 align-top",
-                    o.cohort.isEstimated && "bg-amber-50/40"
+                    o.cohort.isPlaceholder && "bg-slate-50/80"
                   )}
                 >
                   <td className="px-2 py-3">
                     <div className="font-medium text-slate-900">
-                      {o.cohort.isEstimated ? (
-                        <span className="italic">
-                          {o.cohort.cohortName}
-                          <span className="ml-1 font-normal text-slate-500 not-italic">
-                            ({o.cohort.optionType})
-                          </span>
-                        </span>
-                      ) : (
-                        o.cohort.cohortName
-                      )}
+                      {o.cohort.cohortName}
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
                       {code ? (
@@ -201,14 +193,14 @@ export function CohortTable({
                           type="button"
                           onClick={() => onCopyCode(code, o.cohort.id)}
                           className="inline-flex items-center gap-1 rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[11px] text-white hover:bg-slate-700"
-                          title="Copiar Cohort Code"
+                          title="Copiar código"
                         >
                           {code}
                           <Copy className="h-3 w-3" />
                           {copiedId === o.cohort.id ? " ✓" : ""}
                         </button>
                       ) : (
-                        !o.cohort.isEstimated && (
+                        !o.cohort.isPlaceholder && (
                           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800">
                             Sin código
                           </span>
@@ -219,7 +211,7 @@ export function CohortTable({
                           {o.cohort.academy}
                         </span>
                       )}
-                      {!o.cohort.isEstimated && o.cohort.program && (
+                      {o.cohort.program && (
                         <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-800">
                           {o.cohort.program}
                         </span>
@@ -227,8 +219,8 @@ export function CohortTable({
                       <span
                         className={cn(
                           "rounded px-1.5 py-0.5 text-[11px]",
-                          o.cohort.isEstimated
-                            ? "bg-amber-100 text-amber-800"
+                          o.cohort.isPlaceholder
+                            ? "bg-slate-200 text-slate-700"
                             : "bg-green-50 text-green-800"
                         )}
                       >
@@ -240,31 +232,42 @@ export function CohortTable({
                     {formatIsoDisplay(o.cohort.preworkStartDate)}
                   </td>
                   <td className="px-2 py-3 whitespace-nowrap text-slate-700">
-                    {formatIsoDisplay(o.cohort.contentStartDate)}
-                  </td>
-                  <td className="px-2 py-3 whitespace-nowrap text-slate-700">
                     {formatIsoDisplay(o.cohort.courseEndDate)}
                   </td>
                   <td className="px-2 py-3">
-                    <div>
-                      {seg
-                        ? `${seg.localStartTime} – ${seg.localEndTime}`
-                        : "—"}
-                      {seg?.dayShift ? (
-                        <span className="ml-1 text-xs text-slate-400">
-                          {seg.dayShift}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="text-xs text-slate-400">
-                      Franja máx: {o.maxBand.earliestStart} – {o.maxBand.latestEnd}
-                    </div>
+                    {o.timeBands.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {o.timeBands.map((band) => (
+                          <div key={`${band.label}-${band.localStartTime}`}>
+                            {band.label ? (
+                              <div className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                                {band.label}
+                              </div>
+                            ) : null}
+                            <div>
+                              {band.localStartTime} – {band.localEndTime}
+                              {band.dayShift ? (
+                                <span className="ml-1 text-xs text-slate-400">
+                                  {band.dayShift}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              Franja máx: {band.maxBand.earliestStart} –{" "}
+                              {band.maxBand.latestEnd}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
                   </td>
                   <td className="px-2 py-3">
                     <div>{o.cohort.anchorCountry}</div>
                     <div className="text-xs text-slate-400">
-                      {seg
-                        ? `${seg.anchorAbbr} (${offsetLabel(seg.anchorOffset)})`
+                      {o.segments[0]
+                        ? `${o.segments[0].anchorAbbr} (${offsetLabel(o.segments[0].anchorOffset)})`
                         : "—"}
                     </div>
                   </td>
