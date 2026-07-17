@@ -18,13 +18,31 @@ import {
 
 const TIME_RE = /^(\d{1,2})(?::(\d{2}))?(am|pm)$/i;
 
+/** Spain rotativo = morning + afternoon slots */
+const ROTATIVO_SCHEDULES = ["ES-MWF-10am-13pm", "ES-MWF-630pm-930pm"] as const;
+const ROTATIVO_LABELS = ["Mañana", "Tarde"] as const;
+
+export function expandScheduleSlots(schedule: string): Array<{
+  schedule: string;
+  label: string;
+}> {
+  const normalized = schedule.trim();
+  if (/rotativo/i.test(normalized)) {
+    return ROTATIVO_SCHEDULES.map((s, i) => ({
+      schedule: s,
+      label: ROTATIVO_LABELS[i],
+    }));
+  }
+  return [{ schedule: normalized, label: "" }];
+}
+
 export function parseScheduleTimes(schedule: string): {
   startHour: number;
   startMinute: number;
   endHour: number;
   endMinute: number;
 } | null {
-  // e.g. ES-MWF-630pm-930pm or ES-MWF-6:30pm-9:30pm
+  // e.g. ES-MWF-630pm-930pm or ES-MWF-6:30pm-9:30pm or ES-MWF-10am-13pm
   const parts = schedule.trim().split("-");
   if (parts.length < 4) return null;
   const startRaw = parts[parts.length - 2];
@@ -42,7 +60,7 @@ export function parseScheduleTimes(schedule: string): {
 
 function parseClock(raw: string): { h: number; m: number } | null {
   const cleaned = raw.replace(/\s/g, "").toLowerCase();
-  // 630pm → 6:30pm
+  // 630pm → 6:30pm; 13pm → 1:00pm (13 already 24h-ish)
   const normalized = cleaned.replace(/^(\d{1,2})(\d{2})(am|pm)$/i, "$1:$2$3");
   const m = normalized.match(TIME_RE);
   if (!m) return null;
@@ -51,6 +69,10 @@ function parseClock(raw: string): { h: number; m: number } | null {
   const ampm = m[3].toLowerCase();
   if (ampm === "pm" && h < 12) h += 12;
   if (ampm === "am" && h === 12) h = 0;
+  // 13pm → treat as 13:00 (already afternoon in 24h)
+  if (ampm === "pm" && h > 12 && h <= 23) {
+    // keep as-is
+  }
   return { h, m: min };
 }
 
@@ -287,34 +309,11 @@ function maxBandFromSegments(segments: ScheduleSegment[]): {
   return { earliestStart: earliest, latestEnd: latest };
 }
 
-function dateMatchBadge(
-  contentStartIso: string,
-  month: number,
-  year: number
-): CohortOption["badges"] {
-  const start = DateTime.fromISO(contentStartIso);
-  if (!start.isValid) return [];
-  const target = DateTime.fromObject({ year, month, day: 1 });
-  const diff = Math.abs(start.diff(target, "days").days);
-  if (diff <= 45) {
-    return [
-      {
-        type: "date",
-        label: "Mejor match por fecha",
-        tooltip: `Diferencia: ${Math.round(diff)} días respecto al mes seleccionado (${month}/${year})`,
-      },
-    ];
-  }
-  return [];
-}
-
 export function buildCohortOption(
   raw: NotionCohort,
-  studentCountry: string,
-  month: number,
-  year: number
+  studentCountry: string
 ): CohortOption | null {
-  const startDate = raw.contentStartDate;
+  const startDate = raw.preworkStartDate;
   const endDate = raw.courseEndDate;
   if (!startDate || !endDate) return null;
 
@@ -336,17 +335,35 @@ export function buildCohortOption(
     studentCountry,
     anchorCountry
   );
-  const segments = buildSegments(
-    startDate,
-    endDate,
-    raw.schedule,
-    anchorCountry,
-    studentCountry,
-    segmentBreaks
-  );
 
+  const slots = expandScheduleSlots(raw.schedule);
+  const timeBands = slots.map(({ schedule, label }) => {
+    const segments = buildSegments(
+      startDate,
+      endDate,
+      schedule,
+      anchorCountry,
+      studentCountry,
+      segmentBreaks
+    );
+    const first = segments[0];
+    return {
+      label,
+      localStartTime: first?.localStartTime || "—",
+      localEndTime: first?.localEndTime || "—",
+      dayShift: first?.dayShift || "",
+      maxBand: maxBandFromSegments(segments),
+      segments,
+    };
+  });
+
+  const primary = timeBands[0];
+  const segments = primary?.segments || [];
   const student = findCountry(studentCountry);
   const firstSeg = segments[0];
+
+  const allStarts = timeBands.map((b) => b.maxBand.earliestStart).filter((t) => t !== "—");
+  const allEnds = timeBands.map((b) => b.maxBand.latestEnd).filter((t) => t !== "—");
 
   return {
     cohort: {
@@ -363,38 +380,15 @@ export function buildCohortOption(
       offset: firstSeg?.studentOffset ?? student?.offset ?? 0,
     },
     segments,
-    maxBand: maxBandFromSegments(segments),
+    timeBands,
+    maxBand: {
+      earliestStart: allStarts[0] || "—",
+      latestEnd: allEnds[allEnds.length - 1] || "—",
+    },
     hasDSTChange: dstChanges.length > 0,
     dstChanges,
-    badges: dateMatchBadge(startDate, month, year),
+    badges: [],
   };
-}
-
-export function filterByDesiredMonth(
-  options: CohortOption[],
-  month: number,
-  year: number,
-  durationWeeks: number
-): CohortOption[] {
-  const windowStart = DateTime.fromObject({ year, month, day: 1 }).minus({
-    days: 20,
-  });
-  const windowEnd = DateTime.fromObject({ year, month, day: 1 })
-    .endOf("month")
-    .plus({ days: 45 });
-
-  return options.filter((o) => {
-    const start = DateTime.fromISO(o.cohort.startDate);
-    if (!start.isValid) return false;
-    // keep cohorts that start near the desired month window
-    if (start < windowStart || start > windowEnd) {
-      // also keep if end is far and duration overlaps — still include near matches
-      const approxEnd = start.plus({ weeks: durationWeeks });
-      void approxEnd;
-      return false;
-    }
-    return true;
-  });
 }
 
 export { addDaysIso, toDisplayDate };

@@ -25,7 +25,8 @@ export type NotionCohort = {
   studentsCount: number | null;
   studentGoal: number | null;
   isOpen: boolean;
-  isEstimated?: boolean;
+  /** Fixed generic code row (not from Notion dates) */
+  isPlaceholder?: boolean;
 };
 
 export type ScheduleSegment = {
@@ -41,6 +42,16 @@ export type ScheduleSegment = {
   dayShift: string;
 };
 
+export type TimeBand = {
+  /** e.g. "Mañana" / "Tarde" for rotativo; empty for single schedule */
+  label: string;
+  localStartTime: string;
+  localEndTime: string;
+  dayShift: string;
+  maxBand: { earliestStart: string; latestEnd: string };
+  segments: ScheduleSegment[];
+};
+
 export type DstChangeInfo = {
   date: string;
   from: string;
@@ -52,14 +63,17 @@ export type DstChangeInfo = {
 
 export type CohortOption = {
   cohort: NotionCohort & {
-    /** Alias used by conversion / badges (content start) */
+    /** Alias used by conversion (prework start); empty for placeholders */
     startDate: string;
     endDate: string;
   };
   localStartDate: string;
   localEndDate: string;
   studentTimezone: { abbr: string; offset: number };
+  /** Primary segments (first time band) — used by DST modal */
   segments: ScheduleSegment[];
+  /** One entry per schedule slot (rotativo → mañana + tarde) */
+  timeBands: TimeBand[];
   maxBand: { earliestStart: string; latestEnd: string };
   hasDSTChange: boolean;
   dstChanges: DstChangeInfo[];
@@ -74,11 +88,4 @@ export type DstCalendarEntry = {
   to: string;
   fromOffset: number;
   toOffset: number;
-};
-
-export type CohortsResponse = {
-  /** Reference slot for the desired month (synthetic, not from Notion) */
-  estimated: CohortOption | null;
-  /** All open cohorts from Notion (no month window filter) */
-  available: CohortOption[];
 };
