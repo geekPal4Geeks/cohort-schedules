@@ -49,24 +49,24 @@ function EnrollmentCell({ cohort }: { cohort: CohortOption["cohort"] }) {
   const isOver = hasCount && hasGoal && studentsCount! > studentGoal!;
 
   let barColor = "bg-slate-300";
-  let textColor = "text-slate-900";
+  let countColor = "text-slate-900";
   if (rawPct != null && !isOver) {
     if (rawPct >= 85) {
       barColor = "bg-emerald-500";
-      textColor = "text-emerald-700";
+      countColor = "text-emerald-600";
     } else if (rawPct >= 50) {
       barColor = "bg-amber-500";
-      textColor = "text-amber-700";
+      countColor = "text-amber-600";
     } else if (rawPct >= 20) {
-      barColor = "bg-yellow-400";
-      textColor = "text-yellow-700";
+      barColor = "bg-yellow-500";
+      countColor = "text-yellow-600";
     } else {
       barColor = "bg-red-500";
-      textColor = "text-red-700";
+      countColor = "text-red-600";
     }
   } else if (isOver) {
     barColor = "bg-red-500";
-    textColor = "text-red-700";
+    countColor = "text-red-600";
   }
 
   return (
@@ -74,9 +74,9 @@ function EnrollmentCell({ cohort }: { cohort: CohortOption["cohort"] }) {
       {hasCount && hasGoal ? (
         <>
           <div className="flex items-center gap-1.5">
-            <span className={cn("text-sm font-medium tabular-nums", textColor)}>
-              {studentsCount}
-              <span className="font-normal text-slate-400">/{studentGoal}</span>
+            <span className="text-sm font-medium tabular-nums">
+              <span className={countColor}>{studentsCount}</span>
+              <span className="text-slate-400">/{studentGoal}</span>
             </span>
             {isOver ? (
               <span
