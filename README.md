@@ -16,6 +16,7 @@ Réplica mejorada de [admissions-sync-tool.replit.app](https://admissions-sync-t
   - **Prework** → `Start date (prework)` (inicio usado para horarios/DST)
   - **Fin** → `End Date (course)`
 - **Inscripción** → `Students Count` / `Student Goal` (p. ej. `18/25`)
+  - &lt;20% rojo · 20–49% amarillo · 50–84% ámbar · 85–100% verde · &gt;100% ⚠️ (excedido)
 
 ## Stack
 
