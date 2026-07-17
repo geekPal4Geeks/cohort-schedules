@@ -41,38 +41,52 @@ function EnrollmentCell({ cohort }: { cohort: CohortOption["cohort"] }) {
   const hasGoal = studentGoal != null && studentGoal > 0;
   const remaining =
     hasGoal && hasCount ? studentGoal - studentsCount : null;
-  const fillPct =
+  const rawPct =
     hasGoal && hasCount
-      ? Math.min(100, Math.round((studentsCount / studentGoal) * 100))
+      ? Math.round((studentsCount / studentGoal) * 100)
       : null;
+  const fillPct = rawPct != null ? Math.min(100, rawPct) : null;
+  const isOver = hasCount && hasGoal && studentsCount! > studentGoal!;
 
-  let barColor = "bg-emerald-500";
+  let barColor = "bg-slate-300";
   let textColor = "text-slate-900";
-  if (fillPct != null && hasCount && hasGoal) {
-    if (studentsCount! > studentGoal!) {
-      barColor = "bg-red-500";
-      textColor = "text-red-700";
-    } else if (fillPct >= 100) {
-      barColor = "bg-blue-500";
-      textColor = "text-blue-700";
-    } else if (fillPct >= 80) {
+  if (rawPct != null && !isOver) {
+    if (rawPct >= 85) {
       barColor = "bg-emerald-500";
       textColor = "text-emerald-700";
-    } else {
+    } else if (rawPct >= 50) {
       barColor = "bg-amber-500";
       textColor = "text-amber-700";
+    } else if (rawPct >= 20) {
+      barColor = "bg-yellow-400";
+      textColor = "text-yellow-700";
+    } else {
+      barColor = "bg-red-500";
+      textColor = "text-red-700";
     }
+  } else if (isOver) {
+    barColor = "bg-red-500";
+    textColor = "text-red-700";
   }
 
   return (
     <div className="min-w-[80px] space-y-1">
       {hasCount && hasGoal ? (
         <>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <span className={cn("text-sm font-medium tabular-nums", textColor)}>
               {studentsCount}
               <span className="font-normal text-slate-400">/{studentGoal}</span>
             </span>
+            {isOver ? (
+              <span
+                className="cursor-help text-sm leading-none"
+                title="Excedido el número de matrículas permitido."
+                aria-label="Excedido el número de matrículas permitido."
+              >
+                ⚠️
+              </span>
+            ) : null}
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
             <div

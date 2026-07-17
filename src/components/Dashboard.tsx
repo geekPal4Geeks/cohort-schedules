@@ -159,6 +159,7 @@ export function Dashboard() {
     let list = [...options];
 
     if (hideFull) {
+      // Hide at capacity and over capacity (count >= goal)
       list = list.filter((o) => {
         if (o.cohort.studentsCount == null || o.cohort.studentGoal == null) {
           return o.cohort.isOpen;
